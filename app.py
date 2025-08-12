@@ -1,18 +1,22 @@
 # -*- coding: utf-8 -*-
 """
 YouTube → MP4 + MP3/WAV GUI (PySide6)
-- Descarga con yt-dlp (videos individuales o playlists).
+- Descarga con yt-dlp (videos o playlists).
 - Convierte audio a MP3 y/o WAV con ffmpeg.
 - Opción para borrar el MP4 luego de convertir.
 - Progreso y logs en vivo.
 - Tema oscuro con qdarkstyle.
-- Ventana muestra "© 2025 Gabriel Golker" en el footer.
-- Setea ícono de ventana si existe assets/app.png o assets/app.ico.
+- Footer con "© 2025 Gabriel Golker".
+- Ícono de ventana si existe assets/app.png o assets/app.ico.
+
+Actualización:
+- Detecta ffmpeg en varios lugares (junto al exe, ./ffmpeg/ffmpeg.exe, ./assets/ffmpeg.exe, PATH).
+- Ejecuta ffmpeg usando listas de argumentos (no shlex) → robusto en Windows con rutas con espacios.
 
 Nota legal: usa esto solo con contenido propio o con permiso.
 """
 
-import sys, os, re, shlex, subprocess, threading
+import sys, os, re, subprocess, threading
 from pathlib import Path
 
 from PySide6.QtWidgets import (
@@ -26,35 +30,77 @@ from PySide6.QtCore import Qt, Signal, QObject
 import qdarkstyle
 from yt_dlp import YoutubeDL
 
-# ------------------ helpers ------------------
+
+# ------------------ utilidades ------------------
 
 def resource_path(rel: str) -> str:
+    """Soporta PyInstaller (onefile/onedir) y ejecución normal."""
     base = getattr(sys, "_MEIPASS", None)
     if base:
         return str(Path(base) / rel)
     return str(Path(__file__).parent / rel)
 
 def which_ffmpeg() -> str:
-    # Intentar 'ffmpeg' en PATH
-    return 'ffmpeg'
+    """
+    Devuelve la ruta a ffmpeg:
+    1) junto al exe (onedir): Path(sys.executable).parent/ffmpeg.exe
+    2) ./ffmpeg/ffmpeg.exe
+    3) ./assets/ffmpeg.exe
+    4) en PATH del sistema
+    """
+    from shutil import which as which_cmd
 
-def run_cmd(cmd: str):
+    # 1) junto al exe (cuando está compilado)
+    try:
+        here = Path(sys.executable).parent
+        cand = here / "ffmpeg.exe"
+        if cand.exists():
+            return str(cand)
+    except Exception:
+        pass
+
+    # 2) carpeta ffmpeg/ local
+    cand2 = Path(resource_path("ffmpeg/ffmpeg.exe"))
+    if cand2.exists():
+        return str(cand2)
+
+    # 3) assets/
+    cand3 = Path(resource_path("assets/ffmpeg.exe"))
+    if cand3.exists():
+        return str(cand3)
+
+    # 4) PATH
+    in_path = which_cmd("ffmpeg")
+    if in_path:
+        return in_path
+
+    raise FileNotFoundError(
+        "No se encontró ffmpeg.\n"
+        "Pon ffmpeg.exe junto a app.exe (recomendado), o en ./ffmpeg/ffmpeg.exe, "
+        "o ./assets/ffmpeg.exe, o añade ffmpeg al PATH del sistema."
+    )
+
+def run_process(args):
+    """
+    Ejecuta un proceso con lista de argumentos (seguro para rutas con espacios).
+    Emite stdout+stderr línea a línea.
+    """
     proc = subprocess.Popen(
-        shlex.split(cmd),
+        args,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
-        encoding='utf-8',
-        errors='replace'
+        encoding="utf-8",
+        errors="replace",
     )
     for line in proc.stdout:
         yield line.rstrip()
     proc.wait()
-    returncode = proc.returncode
-    if returncode != 0:
-        raise RuntimeError(f"Comando falló ({returncode}): {cmd}")
+    if proc.returncode != 0:
+        raise RuntimeError(f"Comando falló ({proc.returncode}): {' '.join(args)}")
 
-# ------------------ worker ------------------
+
+# ------------------ threading / worker ------------------
 
 class Signals(QObject):
     log = Signal(str)
@@ -76,7 +122,7 @@ class DownloaderThread(threading.Thread):
     def stop(self):
         self.stop_flag = True
 
-    # yt-dlp progress hook (por item)
+    # Hook de progreso por ítem de yt-dlp
     def _hook(self, d):
         if self.stop_flag:
             raise KeyboardInterrupt("Cancelado por el usuario.")
@@ -84,32 +130,35 @@ class DownloaderThread(threading.Thread):
             total = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
             downloaded = d.get('downloaded_bytes') or 0
             pct = int(downloaded * 100 / total) if total else 0
-            self.s.progress.emit(min(max(pct, 0), 100))
+            self.s.progress.emit(max(0, min(100, pct)))
 
     def _convert(self, mp4_path: Path):
         ffmpeg = which_ffmpeg()
+        self.s.log.emit(f"ffmpeg: {ffmpeg}")
         stem = mp4_path.with_suffix('')
         do_mp3 = (self.choice in ('MP3', 'Ambos'))
         do_wav = (self.choice in ('WAV', 'Ambos'))
 
         if do_mp3:
-            cmd = f'{ffmpeg} -y -i "{mp4_path}" -vn -b:a 320k "{stem}.mp3"'
-            self.s.log.emit(f'$ {cmd}')
-            for line in run_cmd(cmd):
+            out_mp3 = str(stem) + ".mp3"
+            args = [ffmpeg, "-y", "-i", str(mp4_path), "-vn", "-b:a", "320k", out_mp3]
+            self.s.log.emit("$ " + " ".join(f'"{a}"' if " " in a else a for a in args))
+            for line in run_process(args):
                 self.s.log.emit(line)
 
         if do_wav:
-            cmd = f'{ffmpeg} -y -i "{mp4_path}" -vn -ar 44100 -ac 2 -f wav "{stem}.wav"'
-            self.s.log.emit(f'$ {cmd}')
-            for line in run_cmd(cmd):
+            out_wav = str(stem) + ".wav"
+            args = [ffmpeg, "-y", "-i", str(mp4_path), "-vn", "-ar", "44100", "-ac", "2", "-f", "wav", out_wav]
+            self.s.log.emit("$ " + " ".join(f'"{a}"' if " " in a else a for a in args))
+            for line in run_process(args):
                 self.s.log.emit(line)
 
         if self.delete_mp4 and mp4_path.exists():
             try:
                 mp4_path.unlink()
-                self.s.log.emit(f'Eliminado MP4: {mp4_path.name}')
+                self.s.log.emit(f"Eliminado MP4: {mp4_path.name}")
             except Exception as e:
-                self.s.log.emit(f'No se pudo borrar {mp4_path.name}: {e}')
+                self.s.log.emit(f"No se pudo borrar {mp4_path.name}: {e}")
 
     def run(self):
         try:
@@ -125,20 +174,19 @@ class DownloaderThread(threading.Thread):
                 'progress_hooks': [self._hook],
                 'postprocessors': [{
                     'key': 'FFmpegVideoRemuxer',
-                    'preferedformat': 'mp4',
+                    'preferedformat': 'mp4',  # (sic) nombre de clave histórico en yt-dlp
                 }],
                 'concurrent_fragment_downloads': 4,
             }
 
-            # Recuento estimado para progreso global
+            # Prescan para estimar cantidad total de ítems (progreso global simple)
             total_items = 0
-            # Pre-scan rápido de playlists: yt-dlp puede extraer info sin bajar
             prescan_opts = dict(ydl_opts)
             prescan_opts['skip_download'] = True
             with YoutubeDL(prescan_opts) as ydl:
                 for url in self.urls:
                     info = ydl.extract_info(url, download=False)
-                    if info is None:
+                    if not info:
                         continue
                     if 'entries' in info and info['entries']:
                         total_items += sum(1 for e in info['entries'] if e)
@@ -164,16 +212,17 @@ class DownloaderThread(threading.Thread):
                     else:
                         entries.append(info)
 
-                    # Para cada entrada, construir el nombre esperado .mp4 y convertir
                     for e in entries:
                         title = e.get('title', 'video')
                         vid = e.get('id', 'id')
+                        # Nombre esperado que genera yt-dlp con la plantilla
                         mp4_path = self.outdir / f"{title} [{vid}].mp4"
-                        # Si por caracteres raros no coincide, buscar cualquier .mp4 con el id
+
+                        # Si por caracteres especiales no coincide exactamente, buscar por ID
                         if not mp4_path.exists():
-                            for cand in self.outdir.glob(f"*[{vid}]*.mp4"):
-                                mp4_path = cand
-                                break
+                            candidates = list(self.outdir.glob(f"*[{vid}]*.mp4"))
+                            if candidates:
+                                mp4_path = candidates[0]
 
                         if mp4_path.exists():
                             self.s.log.emit(f"Convertir: {mp4_path.name}")
@@ -182,11 +231,13 @@ class DownloaderThread(threading.Thread):
                             self.s.log.emit(f"No se encontró MP4 esperado para {title} [{vid}]")
 
                         processed_items += 1
-                        # Progreso global aproximado por ítems
                         pct_global = int(processed_items * 100 / total_items)
-                        self.s.progress.emit(min(max(pct_global, 0), 100))
+                        self.s.progress.emit(max(0, min(100, pct_global)))
 
             self.s.log.emit("Completado.")
+        except FileNotFoundError as e:
+            # Mensaje claro si falta ffmpeg
+            self.s.log.emit(f"Error: {e}")
         except KeyboardInterrupt:
             self.s.log.emit("Cancelado por el usuario.")
         except Exception as e:
@@ -194,6 +245,7 @@ class DownloaderThread(threading.Thread):
         finally:
             self.s.enable_ui.emit(True)
             self.s.done.emit()
+
 
 # ------------------ GUI ------------------
 
@@ -219,7 +271,7 @@ class MainWindow(QWidget):
         self.txt_urls.setPlaceholderText("Pega aquí uno o varios enlaces de YouTube (videos o playlists).")
         root.addWidget(self.txt_urls)
 
-        # Output dir + selector
+        # Carpeta de salida + selector
         row_out = QHBoxLayout()
         self.ed_out = QLineEdit(str(Path.cwd() / "salida"))
         btn_browse = QPushButton("Elegir carpeta…")
@@ -229,7 +281,7 @@ class MainWindow(QWidget):
         row_out.addWidget(btn_browse)
         root.addLayout(row_out)
 
-        # Formato de salida y opciones
+        # Formato y opciones
         row_fmt = QHBoxLayout()
         row_fmt.addWidget(QLabel("Audio:"))
         self.cmb_audio = QComboBox()
@@ -243,7 +295,7 @@ class MainWindow(QWidget):
         row_fmt.addStretch(1)
         root.addLayout(row_fmt)
 
-        # Template de nombre
+        # Plantilla de nombre
         row_tpl = QHBoxLayout()
         row_tpl.addWidget(QLabel("Plantilla de nombre:"))
         self.ed_tpl = QLineEdit("%(title)s [%(id)s]")
@@ -326,11 +378,11 @@ class MainWindow(QWidget):
             self.worker.stop()
             self.append_log("Solicitando cancelación…")
 
+
 def main():
     app = QApplication(sys.argv)
-    # Tema oscuro
-    app.setStyleSheet(qdarkstyle.load_stylesheet(qt_api='pyside6'))
-    # Ícono global si existe
+    app.setStyleSheet(qdarkstyle.load_stylesheet(qt_api='pyside6'))  # tema oscuro
+    # Ícono global
     ico_png = Path(resource_path("assets/app.png"))
     ico_ico = Path(resource_path("assets/app.ico"))
     if ico_png.exists():
@@ -341,5 +393,7 @@ def main():
     w.show()
     sys.exit(app.exec())
 
+
 if __name__ == "__main__":
     main()
+
