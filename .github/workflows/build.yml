@@ -13,54 +13,49 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          lfs: true           # por si el .ico está en Git LFS
+          lfs: true
           fetch-depth: 0
 
-      - name: Debug paths (compat PowerShell 5.1)
+      - name: Show tree & check icon
         shell: powershell
         run: |
           Write-Host "PWD:" (Get-Location)
-          Write-Host "`nListado (primeros 200 archivos):"
-          Get-ChildItem -Recurse | Select-Object -First 200 | ForEach-Object { $_.FullName }
-          Write-Host "`nBuscar app.ico:"
-          $ico = Get-ChildItem -Recurse -Filter app.ico | Select-Object -First 1
-          if ($null -eq $ico) {
-            Write-Error "No se encontró ningún app.ico en el repo."
+          if (-not (Test-Path ".\assets\app.ico")) {
+            Write-Error "Falta .\assets\app.ico en la raíz del repo."
             exit 1
-          } else {
-            Write-Host "Encontrado:" $ico.FullName
           }
+          $ico = Get-Item ".\assets\app.ico"
+          Write-Host ("Icono: {0} ({1} bytes)" -f $ico.FullName, $ico.Length)
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Install dependencies
+      - name: Install deps
         shell: powershell
         run: |
-          python -m pip install --upgrade pip
+          python -m pip install --upgrade pip wheel setuptools
           pip install -r requirements.txt
           pip install pyinstaller
+          python -c "import sys,pyinstaller; print('Python',sys.version); import PyInstaller; print('PyInstaller',PyInstaller.__version__)"
 
-      - name: (Opcional) Install ffmpeg for runtime test
-        shell: powershell
-        run: choco install ffmpeg -y
-
-      - name: Build (PyInstaller, icono obligatorio)
+      - name: Build (PyInstaller, icon required)
         shell: powershell
         run: |
-          if (-not (Test-Path ".\assets\app.ico")) {
-            Write-Error "Falta .\assets\app.ico en la raíz del repo."
-            exit 1
-          }
           $icoAbs = (Resolve-Path ".\assets\app.ico").Path
           $appAbs = (Resolve-Path ".\app.py").Path
           Write-Host "Usando icono:" $icoAbs
           Write-Host "Script:" $appAbs
-          pyinstaller --noconfirm --onefile --windowed --icon "$icoAbs" "$appAbs"
+          pyinstaller `
+            --noconfirm `
+            --onefile `
+            --windowed `
+            --noupx `
+            --icon "$icoAbs" `
+            "$appAbs"
           Write-Host "Built files:"
-          Get-ChildItem -Recurse dist
+          Get-ChildItem -Recurse .\dist
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -68,5 +63,4 @@ jobs:
           name: dist
           path: dist
 
-          path: dist
 
