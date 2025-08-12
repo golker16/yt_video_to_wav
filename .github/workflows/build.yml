@@ -16,10 +16,9 @@ jobs:
           lfs: true
           fetch-depth: 0
 
-      - name: Show tree & check icon
+      - name: Check icon exists
         shell: powershell
         run: |
-          Write-Host "PWD:" (Get-Location)
           if (-not (Test-Path ".\assets\app.ico")) {
             Write-Error "Falta .\assets\app.ico en la raíz del repo."
             exit 1
@@ -38,7 +37,6 @@ jobs:
           python -m pip install --upgrade pip wheel setuptools
           pip install -r requirements.txt
           pip install pyinstaller
-          python -c "import sys,pyinstaller; print('Python',sys.version); import PyInstaller; print('PyInstaller',PyInstaller.__version__)"
 
       - name: Build (PyInstaller, icon required)
         shell: powershell
@@ -62,5 +60,4 @@ jobs:
         with:
           name: dist
           path: dist
-
 
