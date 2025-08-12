@@ -1,4 +1,4 @@
-name: Build Windows EXE
+name: Build Windows EXE (one-folder, PySide6 collect)
 
 on:
   push:
@@ -38,19 +38,20 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
-      - name: Build (PyInstaller, icon required)
+      - name: Build (onedir, no-UPX, PySide6 collected)
         shell: powershell
         run: |
           $icoAbs = (Resolve-Path ".\assets\app.ico").Path
           $appAbs = (Resolve-Path ".\app.py").Path
-          Write-Host "Usando icono:" $icoAbs
-          Write-Host "Script:" $appAbs
           pyinstaller `
             --noconfirm `
-            --onefile `
             --windowed `
+            --onedir `
             --noupx `
             --icon "$icoAbs" `
+            --collect-all PySide6 `
+            --collect-all shiboken6 `
+            --add-data "assets\app.png;assets" `
             "$appAbs"
           Write-Host "Built files:"
           Get-ChildItem -Recurse .\dist
@@ -60,4 +61,5 @@ jobs:
         with:
           name: dist
           path: dist
+
 
