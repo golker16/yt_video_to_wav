@@ -1,1 +1,0 @@
-Coloca aquí tu icono como app.ico (Windows) y/o app.png (para la ventana).
