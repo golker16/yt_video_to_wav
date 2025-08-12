@@ -8,6 +8,7 @@ on:
 jobs:
   build:
     runs-on: windows-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -22,26 +23,32 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pyinstaller
+        shell: powershell
 
-      - name: Install ffmpeg (for runtime conversion)
+      - name: Install ffmpeg (runtime)
         run: |
           choco install ffmpeg -y
         shell: powershell
 
+      # Compila con icono si assets/app.ico existe; si no, compila sin icono
       - name: Build (PyInstaller)
         shell: powershell
         run: |
-         if (Test-Path "assets/app.ico") {
-         pyinstaller --noconfirm --onefile --windowed --icon "assets/app.ico" app.py
-         } else {
-         Write-Host "Sin icono -> compilando sin icono embebido"
-         pyinstaller --noconfirm --onefile --windowed app.py
-    }
-    echo "Built files:"
-    Get-ChildItem -Recurse dist
+          if (Test-Path "assets/app.ico") {
+            Write-Host "Icono encontrado: assets/app.ico"
+            pyinstaller --noconfirm --onefile --windowed --icon "assets/app.ico" app.py
+          } else {
+            Write-Host "Sin icono -> compilando sin icono embebido"
+            pyinstaller --noconfirm --onefile --windowed app.py
+          }
+          Write-Host "Built files:"
+          Get-ChildItem -Recurse dist
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
+          name: dist
+          path: dist
+
           name: dist
           path: dist
