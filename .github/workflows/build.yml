@@ -1,4 +1,4 @@
-name: Build Windows EXE (onedir + ffmpeg bundled)
+name: Build Windows EXE (onedir + real ffmpeg bundled)
 
 on:
   push:
@@ -38,7 +38,6 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
-      # Build en modo carpeta (onedir), sin UPX, forzando colecta de PySide6/shiboken6
       - name: Build (PyInstaller onedir, icon required)
         shell: powershell
         run: |
@@ -57,16 +56,32 @@ jobs:
           Write-Host "Built files:"
           Get-ChildItem -Recurse .\dist
 
-      # Instala ffmpeg en el runner y copia ffmpeg.exe junto al app.exe dentro de dist
-      - name: Bundle ffmpeg.exe into dist
+      # Copia el binario REAL de ffmpeg (no el shim de Chocolatey) dentro de dist\<app>\
+      - name: Bundle real ffmpeg.exe into dist
         shell: powershell
         run: |
           choco install ffmpeg -y
-          $ff = (Get-Command ffmpeg).Source
-          if (-not $ff) { Write-Error "No se encontró ffmpeg en el runner." ; exit 1 }
+          $shim = (Get-Command ffmpeg).Source
+          $shimDir = Split-Path $shim -Parent
+          # Candidato real típico de Chocolatey:
+          $tryBin = Resolve-Path (Join-Path $shimDir "..\lib\ffmpeg\tools\ffmpeg\bin") -ErrorAction SilentlyContinue
+          if ($tryBin) { $bin = $tryBin.Path } else { $bin = $shimDir }
+          $ff = Join-Path $bin "ffmpeg.exe"
+          $ffprobe = Join-Path $bin "ffprobe.exe"
+          if (-not (Test-Path $ff)) {
+            # fallback: por si el shim ya apunta al real
+            $ff = $shim
+          }
+          if (-not (Test-Path $ff)) {
+            Write-Error "No se encontró el binario real de ffmpeg."
+            exit 1
+          }
           $distDir = (Get-ChildItem -Directory .\dist | Select-Object -First 1).FullName
           Copy-Item $ff (Join-Path $distDir 'ffmpeg.exe') -Force
-          Write-Host "Copiado ffmpeg.exe a:" (Join-Path $distDir 'ffmpeg.exe')
+          if (Test-Path $ffprobe) {
+            Copy-Item $ffprobe (Join-Path $distDir 'ffprobe.exe') -Force
+          }
+          & (Join-Path $distDir 'ffmpeg.exe') -version
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
