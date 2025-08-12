@@ -1,4 +1,4 @@
-name: Build Windows EXE (one-folder, PySide6 collect)
+name: Build Windows EXE (onedir + ffmpeg bundled)
 
 on:
   push:
@@ -38,7 +38,8 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
-      - name: Build (onedir, no-UPX, PySide6 collected)
+      # Build en modo carpeta (onedir), sin UPX, forzando colecta de PySide6/shiboken6
+      - name: Build (PyInstaller onedir, icon required)
         shell: powershell
         run: |
           $icoAbs = (Resolve-Path ".\assets\app.ico").Path
@@ -56,10 +57,22 @@ jobs:
           Write-Host "Built files:"
           Get-ChildItem -Recurse .\dist
 
+      # Instala ffmpeg en el runner y copia ffmpeg.exe junto al app.exe dentro de dist
+      - name: Bundle ffmpeg.exe into dist
+        shell: powershell
+        run: |
+          choco install ffmpeg -y
+          $ff = (Get-Command ffmpeg).Source
+          if (-not $ff) { Write-Error "No se encontró ffmpeg en el runner." ; exit 1 }
+          $distDir = (Get-ChildItem -Directory .\dist | Select-Object -First 1).FullName
+          Copy-Item $ff (Join-Path $distDir 'ffmpeg.exe') -Force
+          Write-Host "Copiado ffmpeg.exe a:" (Join-Path $distDir 'ffmpeg.exe')
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: dist
           path: dist
+
 
 
