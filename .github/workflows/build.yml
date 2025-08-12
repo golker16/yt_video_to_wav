@@ -31,11 +31,14 @@ jobs:
       - name: Build (PyInstaller)
         shell: powershell
         run: |
-          $iconArg = ""
-          if (Test-Path "assets/app.ico") { $iconArg = "--icon assets/app.ico" }
-          pyinstaller --noconfirm --onefile --windowed $iconArg app.py
-          echo "Built files:"
-          Get-ChildItem -Recurse dist
+         if (Test-Path "assets/app.ico") {
+         pyinstaller --noconfirm --onefile --windowed --icon "assets/app.ico" app.py
+         } else {
+         Write-Host "Sin icono -> compilando sin icono embebido"
+         pyinstaller --noconfirm --onefile --windowed app.py
+    }
+    echo "Built files:"
+    Get-ChildItem -Recurse dist
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
