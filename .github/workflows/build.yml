@@ -1,4 +1,4 @@
-name: Build Windows EXE (one-folder, no-UPX)
+name: Build Windows EXE
 
 on:
   push:
@@ -13,7 +13,23 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          lfs: true
+          lfs: true           # por si el .ico está en Git LFS
+          fetch-depth: 0
+
+      - name: Debug paths (compat PowerShell 5.1)
+        shell: powershell
+        run: |
+          Write-Host "PWD:" (Get-Location)
+          Write-Host "`nListado (primeros 200 archivos):"
+          Get-ChildItem -Recurse | Select-Object -First 200 | ForEach-Object { $_.FullName }
+          Write-Host "`nBuscar app.ico:"
+          $ico = Get-ChildItem -Recurse -Filter app.ico | Select-Object -First 1
+          if ($null -eq $ico) {
+            Write-Error "No se encontró ningún app.ico en el repo."
+            exit 1
+          } else {
+            Write-Host "Encontrado:" $ico.FullName
+          }
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -27,68 +43,30 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
-      - name: Install ffmpeg (runtime for test)
+      - name: (Opcional) Install ffmpeg for runtime test
         shell: powershell
         run: choco install ffmpeg -y
 
-      - name: Create version file
+      - name: Build (PyInstaller, icono obligatorio)
         shell: powershell
         run: |
-          @"
-# UTF-8
-VSVersionInfo(
-  ffi=FixedFileInfo(
-    filevers=(1, 0, 0, 0),
-    prodvers=(1, 0, 0, 0),
-    mask=0x3f,
-    flags=0x0,
-    OS=0x40004,
-    fileType=0x1,
-    subtype=0x0,
-    date=(0, 0)
-  ),
-  kids=[
-    StringFileInfo([
-      StringTable(
-        '040904b0',
-        [
-          StringStruct('CompanyName', 'Gabriel Golker'),
-          StringStruct('FileDescription', 'YouTube → MP4 + MP3/WAV GUI'),
-          StringStruct('FileVersion', '1.0.0'),
-          StringStruct('InternalName', 'yt_mp4_to_audio'),
-          StringStruct('LegalCopyright', '© 2025 Gabriel Golker'),
-          StringStruct('OriginalFilename', 'yt_mp4_to_audio.exe'),
-          StringStruct('ProductName', 'StreamToAudio'),
-          StringStruct('ProductVersion', '1.0.0'),
-        ]
-      )
-    ]),
-    VarFileInfo([VarStruct('Translation', [1033, 1200])])
-  ]
-)
-"@ | Out-File -Encoding utf8 version_info.txt
-
-      - name: Build (PyInstaller one-folder/no-UPX, icon required)
-        shell: powershell
-        run: |
-          if (-not (Test-Path "./assets/app.ico")) {
-            Write-Error "Falta ./assets/app.ico"
+          if (-not (Test-Path ".\assets\app.ico")) {
+            Write-Error "Falta .\assets\app.ico en la raíz del repo."
             exit 1
           }
-          # one-folder, sin UPX, icono y version info
-          pyinstaller app.py `
-            --noconfirm --windowed `
-            --icon "./assets/app.ico" `
-            --noupx `
-            --version-file version_info.txt `
-            --add-data "assets/app.png;assets" `
-            --distpath "dist" --workpath "build"
+          $icoAbs = (Resolve-Path ".\assets\app.ico").Path
+          $appAbs = (Resolve-Path ".\app.py").Path
+          Write-Host "Usando icono:" $icoAbs
+          Write-Host "Script:" $appAbs
+          pyinstaller --noconfirm --onefile --windowed --icon "$icoAbs" "$appAbs"
           Write-Host "Built files:"
           Get-ChildItem -Recurse dist
 
-      - name: Upload artifact (folder build)
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: dist
+          path: dist
+
           path: dist
 
