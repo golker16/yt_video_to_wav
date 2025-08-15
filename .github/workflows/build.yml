@@ -1,4 +1,4 @@
-name: Build Windows EXE (onedir • PySide6 • QDarkStyle • Molds)
+name: Build Windows EXE (onedir + PySide6 + qdarkstyle)
 
 on:
   push:
@@ -16,19 +16,21 @@ jobs:
           lfs: true
           fetch-depth: 0
 
-      - name: Verify icons and Molds folder (root)
+      - name: Check icons and Molds in repo root
         shell: powershell
         run: |
-          if (-not (Test-Path ".\app.ico")) { Write-Error "Falta .\app.ico en la raíz"; exit 1 }
-          if (-not (Test-Path ".\app.png")) { Write-Error "Falta .\app.png en la raíz"; exit 1 }
-          if (-not (Test-Path ".\Molds"))   { Write-Error "Falta carpeta .\Molds (tus .json)"; exit 1 }
-          Write-Host "Íconos y Molds OK"
+          if (-not (Test-Path ".\app.ico")) { Write-Error "Falta .\app.ico en la raíz del repo."; exit 1 }
+          if (-not (Test-Path ".\app.png")) { Write-Error "Falta .\app.png en la raíz del repo."; exit 1 }
+          if (-not (Test-Path ".\Molds"))   { Write-Error "Falta carpeta .\Molds con tus .json"; exit 1 }
+          $ico = Get-Item ".\app.ico"
+          $png = Get-Item ".\app.png"
+          Write-Host ("Icono ICO: {0} ({1} bytes)" -f $ico.FullName, $ico.Length)
+          Write-Host ("Icono PNG: {0} ({1} bytes)" -f $png.FullName, $png.Length)
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
 
       - name: Install deps
         shell: powershell
@@ -36,10 +38,8 @@ jobs:
           python -m pip install --upgrade pip wheel setuptools
           pip install -r requirements.txt
           pip install pyinstaller
-          # Asegura recursos/estilos de Qt y qdarkstyle:
-          pip install qdarkstyle
 
-      - name: Build (PyInstaller onedir, icon + data en raíz)
+      - name: Build (PyInstaller onedir, icon + data)
         shell: powershell
         run: |
           $icoAbs   = (Resolve-Path ".\app.ico").Path
@@ -49,9 +49,11 @@ jobs:
 
           pyinstaller `
             --noconfirm `
+            --clean `
             --windowed `
             --onedir `
             --noupx `
+            --name "MoldPlayer" `
             --icon "$icoAbs" `
             --collect-all PySide6 `
             --collect-all shiboken6 `
@@ -63,11 +65,10 @@ jobs:
           Write-Host "Built files:"
           Get-ChildItem -Recurse .\dist
 
-      - name: Upload artifact (dist folder)
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: dist
           path: dist
-
 
 
